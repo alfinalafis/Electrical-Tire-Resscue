@@ -1,0 +1,22 @@
+package com.example.myetresq;
+import android.os.Bundle;
+import android.widget.Button;
+
+import androidx.appcompat.app.AppCompatActivity;
+
+public class AboutTeamActivity4 extends AppCompatActivity {
+
+    Button buttonBack;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_about_team4);
+
+        // Inisialisasi tombol BACK
+        buttonBack = findViewById(R.id.buttonBack);
+
+        // Aksi tombol BACK
+        buttonBack.setOnClickListener(v -> finish());
+    }
+}
