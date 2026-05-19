@@ -1,0 +1,169 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include "driver/ledc.h"
+
+/* ================= WIFI ================= */
+const char* ssid = "E-TresQ";
+const char* password = "1234567890";
+WebServer server(80);
+
+/* ============ BTS7960 PIN =============== */
+#define RPWM 5
+#define LPWM 15
+#define REN  4
+#define LEN  18
+
+/* ============ PWM CONFIG ================= */
+#define PWM_FREQ    10000          // ⬅️ diturunkan (AMAN)
+#define PWM_TIMER  LEDC_TIMER_0
+#define PWM_RES    LEDC_TIMER_8_BIT
+#define PWM_MODE   LEDC_HIGH_SPEED_MODE
+#define PWM_CH_R   LEDC_CHANNEL_0
+#define PWM_CH_L   LEDC_CHANNEL_1
+
+/* ========== MOTOR CONTROL =============== */
+int currentDuty = 0;
+int targetDuty  = 0;
+
+const int accelStep = 2;
+const int decelStep = 4;
+const unsigned long rampInterval = 8;
+unsigned long lastRampTime = 0;
+
+/* ======================================= */
+void setupPWM() {
+  ledc_timer_config_t timer = {
+    .speed_mode = PWM_MODE,
+    .duty_resolution = PWM_RES,
+    .timer_num = PWM_TIMER,
+    .freq_hz = PWM_FREQ,
+    .clk_cfg = LEDC_AUTO_CLK
+  };
+  ledc_timer_config(&timer);
+
+  ledc_channel_config_t chR = {
+    .gpio_num = RPWM,
+    .speed_mode = PWM_MODE,
+    .channel = PWM_CH_R,
+    .intr_type = LEDC_INTR_DISABLE,
+    .timer_sel = PWM_TIMER,
+    .duty = 0,
+    .hpoint = 0
+  };
+  ledc_channel_config(&chR);
+
+  ledc_channel_config_t chL = {
+    .gpio_num = LPWM,
+    .speed_mode = PWM_MODE,
+    .channel = PWM_CH_L,
+    .intr_type = LEDC_INTR_DISABLE,
+    .timer_sel = PWM_TIMER,
+    .duty = 0,
+    .hpoint = 0
+  };
+  ledc_channel_config(&chL);
+}
+
+/* ========== MOTOR UPDATE (SMOOTH) ======== */
+void updateMotorSmooth() {
+  if (millis() - lastRampTime < rampInterval) return;
+  lastRampTime = millis();
+
+  if (currentDuty < targetDuty) {
+    currentDuty += accelStep;
+    if (currentDuty > targetDuty) currentDuty = targetDuty;
+  }
+  else if (currentDuty > targetDuty) {
+    currentDuty -= decelStep;
+    if (currentDuty < targetDuty) currentDuty = targetDuty;
+  }
+
+  // ✅ ENABLE BTS7960 SAAT MOTOR JALAN
+  if (currentDuty > 0) {
+    digitalWrite(REN, HIGH);
+    digitalWrite(LEN, HIGH);
+  } else {
+    digitalWrite(REN, LOW);
+    digitalWrite(LEN, LOW);
+  }
+
+  // MAJU
+  ledc_set_duty(PWM_MODE, PWM_CH_R, currentDuty);
+  ledc_update_duty(PWM_MODE, PWM_CH_R);
+
+  // MUNDUR OFF
+  ledc_set_duty(PWM_MODE, PWM_CH_L, 0);
+  ledc_update_duty(PWM_MODE, PWM_CH_L);
+
+  if (currentDuty > 0) {
+    Serial.print("PWM: ");
+    Serial.println(currentDuty);
+  }
+}
+
+/* ========== MOTOR COMMAND ================ */
+void setSpeed(int duty) {
+  Serial.print("SET SPEED -> ");
+  Serial.println(duty);
+
+  targetDuty = constrain(duty, 0, 255);
+}
+
+void smoothStop() {
+  Serial.println("STOP");
+  targetDuty = 0;
+  server.send(200, "text/plain", "STOP");
+}
+
+/* ========== WEB HANDLER ================== */
+void handleRoot() {
+  server.send(200, "text/plain", "ESP32 OK");
+}
+
+void speed100() {
+  setSpeed(100);
+  server.send(200, "text/plain", "SPEED 100");
+}
+
+void speed180() {
+  setSpeed(180);
+  server.send(200, "text/plain", "SPEED 180");
+}
+
+void speed225() {
+  setSpeed(225);
+  server.send(200, "text/plain", "SPEED 225");
+}
+
+/* ================= SETUP ================= */
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+
+  pinMode(REN, OUTPUT);
+  pinMode(LEN, OUTPUT);
+  digitalWrite(REN, LOW);
+  digitalWrite(LEN, LOW);
+
+  setupPWM();
+
+  WiFi.softAP(ssid, password);
+  Serial.println("ESP32 AP STARTED");
+  Serial.print("IP: ");
+  Serial.println(WiFi.softAPIP());
+
+  server.on("/", handleRoot);
+  server.on("/speed100", speed100);
+  server.on("/speed180", speed180);
+  server.on("/speed225", speed225);
+  server.on("/stop", smoothStop);
+
+  server.begin();
+  Serial.println("WEB SERVER READY");
+}
+
+/* ================= LOOP ================== */
+void loop() {
+  server.handleClient();
+  updateMotorSmooth();
+}
